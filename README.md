@@ -1,5 +1,5 @@
 # mysql-async
-async mysql client
+Async mysql client for PHP.
 
 Install
 -----
