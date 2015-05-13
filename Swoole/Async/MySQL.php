@@ -62,6 +62,10 @@ class MySQL
         $config = $this->config;
         $db = new \mysqli;
         $db->connect($config['host'], $config['user'], $config['password'], $config['database'], $config['port']);
+        if (!empty($config['charset']))
+        {
+            $db->set_charset($config['charset']);
+        }
         $db_sock = swoole_get_mysqli_sock($db);
         swoole_event_add($db_sock, array($this, 'onSQLReady'));
         $this->idle_pool[] = array(
