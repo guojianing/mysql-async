@@ -68,16 +68,32 @@ class MySQL
         }
         $db_sock = swoole_get_mysqli_sock($db);
         swoole_event_add($db_sock, array($this, 'onSQLReady'));
-        $this->idle_pool[] = array(
+        $this->idle_pool[$db_sock] = array(
             'object' => $db,
             'socket' => $db_sock,
         );
         $this->connection_num ++;
     }
 
+	/**
+     * remove mysql connection
+     */
+    protected function removeConnection($db_sock)
+    {
+        swoole_event_del($db_sock);
+		$this->idle_pool[$db_sock]['object'] -> close();
+        unset($this->idle_pool[$db_sock]);
+        $this->connection_num --;
+    }
+
     function onSQLReady($db_sock)
     {
-        $task = $this->work_pool[$db_sock];
+        $task = empty($this->work_pool[$db_sock])?Null:$this->work_pool[$db_sock];
+		if(empty($task)){
+            echo "MySQLi Warning: Maybe SQLReady receive a Close event , such as Mysql server close the socket !\n";
+			$this->removeConnection($db_sock);
+			return false;
+		}
 
         /**
          * @var \mysqli
@@ -99,7 +115,7 @@ class MySQL
         }
 
         //release mysqli object
-        $this->idle_pool[] = $task['mysql'];
+        $this->idle_pool[$task['mysql']['socket']] = $task['mysql'];
         unset($this->work_pool[$db_sock]);
 
         //fetch a request from wait queue.
