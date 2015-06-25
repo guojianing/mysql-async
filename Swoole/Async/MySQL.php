@@ -111,6 +111,7 @@ class MySQL
         }
         else
         {
+            call_user_func($callback, $mysqli, $result);
             echo "MySQLi Error: " . mysqli_error($mysqli)."\n";
         }
 
