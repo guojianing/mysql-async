@@ -1,29 +1,42 @@
 <?php
+
 namespace Swoole\Async;
 
+/**
+ * Class MySQL
+ * @package Swoole\Async
+ */
 class MySQL
 {
     /**
      * max connections for mysql client
-     * @var int
+     * @var int $pool_size
      */
     protected $pool_size;
 
+    /**
+     * number of current connection
+     * @var int $connection_num
+     */
     protected $connection_num;
 
     /**
      * idle connection
-     * @var array
+     * @var array $idle_pool
      */
     protected $idle_pool = array();
 
     /**
      * work connetion
-     * @var array
+     * @var array $work_pool
      */
     protected $work_pool = array();
 
-    protected $config;
+    /**
+     * database configuration
+     * @var array $config
+     */
+    protected $config = array();
 
     /**
      * wait connection
@@ -31,22 +44,26 @@ class MySQL
      */
     protected $wait_queue = array();
 
-    protected $round_id;
-
-    function __construct($config, $pool_size = 100)
+    /**
+     * @param array $config
+     * @param int $pool_size
+     * @throws \Exception
+     */
+    public function __construct(array $config, $pool_size = 100)
     {
-        if (empty($config['host']) or empty($config['database']) or empty($config['user']) or empty($config['password']))
-        {
+        if (empty($config['host']) ||
+            empty($config['database']) ||
+            empty($config['user']) ||
+            empty($config['password'])
+        ) {
             throw new \Exception("require host, database, user, password config.");
         }
 
-        if (!function_exists('swoole_get_mysqli_sock'))
-        {
+        if (!function_exists('swoole_get_mysqli_sock')) {
             throw new \Exception("require swoole_get_mysqli_sock function.");
         }
 
-        if (empty($config['port']))
-        {
+        if (empty($config['port'])) {
             $config['port'] = 3306;
         }
 
@@ -62,8 +79,7 @@ class MySQL
         $config = $this->config;
         $db = new \mysqli;
         $db->connect($config['host'], $config['user'], $config['password'], $config['database'], $config['port']);
-        if (!empty($config['charset']))
-        {
+        if (!empty($config['charset'])) {
             $db->set_charset($config['charset']);
         }
         $db_sock = swoole_get_mysqli_sock($db);
@@ -75,42 +91,43 @@ class MySQL
         $this->connection_num ++;
     }
 
-	/**
+    /**
      * remove mysql connection
+     * @param $db_sock
      */
     protected function removeConnection($db_sock)
     {
         swoole_event_del($db_sock);
-		$this->idle_pool[$db_sock]['object'] -> close();
+        $this->idle_pool[$db_sock]['object'] -> close();
         unset($this->idle_pool[$db_sock]);
         $this->connection_num --;
     }
 
-    function onSQLReady($db_sock)
+    /**
+     * @param $db_sock
+     * @return bool
+     */
+    public function onSQLReady($db_sock)
     {
-        $task = empty($this->work_pool[$db_sock])?Null:$this->work_pool[$db_sock];
-		if(empty($task)){
+        $task = empty($this->work_pool[$db_sock]) ? null : $this->work_pool[$db_sock];
+        if (empty($task)) {
             echo "MySQLi Warning: Maybe SQLReady receive a Close event , such as Mysql server close the socket !\n";
-			$this->removeConnection($db_sock);
-			return false;
-		}
+            $this->removeConnection($db_sock);
+            return false;
+        }
 
         /**
-         * @var \mysqli
+         * @var \mysqli $mysqli
          */
         $mysqli = $task['mysql']['object'];
         $callback = $task['callback'];
 
-        if ($result = $mysqli->reap_async_query())
-        {
+        if ($result = $mysqli->reap_async_query()) {
             call_user_func($callback, $mysqli, $result);
-            if (is_object($result))
-            {
+            if (is_object($result)) {
                 mysqli_free_result($result);
             }
-        }
-        else
-        {
+        } else {
             echo "MySQLi Error: " . mysqli_error($mysqli)."\n";
         }
 
@@ -119,67 +136,61 @@ class MySQL
         unset($this->work_pool[$db_sock]);
 
         //fetch a request from wait queue.
-        if (count($this->wait_queue) > 0)
-        {
+        if (count($this->wait_queue) > 0) {
             $idle_n = count($this->idle_pool);
-            for ($i = 0; $i < $idle_n; $i++)
-            {
+            for ($i = 0; $i < $idle_n; $i++) {
                 $new_task = array_shift($this->wait_queue);
                 $this->doQuery($new_task['sql'], $new_task['callback']);
             }
         }
     }
 
-    function query($sql, $callback)
+    /**
+     * @param string $sql
+     * @param callable $callback
+     */
+    public function query($sql, callable $callback)
     {
         //no idle connection
-        if (count($this->idle_pool) == 0)
-        {
-            if ($this->connection_num < $this->pool_size)
-            {
+        if (count($this->idle_pool) == 0) {
+            if ($this->connection_num < $this->pool_size) {
                 $this->createConnection();
                 $this->doQuery($sql, $callback);
-            }
-            else
-            {
+            } else {
                 $this->wait_queue[] = array(
                     'sql'  => $sql,
                     'callback' => $callback,
                 );
             }
-        }
-        else
-        {
+        } else {
             $this->doQuery($sql, $callback);
         }
     }
 
-    protected function doQuery($sql, $callback)
+    /**
+     * @param string $sql
+     * @param callable $callback
+     */
+    protected function doQuery($sql, callable $callback)
     {
         //remove from idle pool
         $db = array_pop($this->idle_pool);
 
         /**
-         * @var \mysqli
+         * @var \mysqli $mysqli
          */
         $mysqli = $db['object'];
 
-        for ($i = 0; $i < 2; $i++)
-        {
+        for ($i = 0; $i < 2; $i++) {
             $result = $mysqli->query($sql, MYSQLI_ASYNC);
-            if ($result === false)
-            {
-                if ($mysqli->errno == 2013 or $mysqli->errno == 2006)
-                {
+            if ($result === false) {
+                if ($mysqli->errno == 2013 or $mysqli->errno == 2006) {
                     $mysqli->close();
                     $r = $mysqli->connect();
-                    if ($r === true)
-                    {
+                    if ($r === true) {
                         continue;
                     }
-                }
-                else
-                {
+                } else {
                     echo "server exception. \n";
                     $this->connection_num --;
                     $this->wait_queue[] = array(
