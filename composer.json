@@ -1,0 +1,16 @@
+{
+    "name": "swoole/mysql-async",
+    "description": "Swoole MySQL Asyncronus Implementation",
+    "type": "library",
+    "license": "Apache-2.0",
+    "authors": [
+        {
+            "name": "Swoole",
+            "email": "team@swoole.com"
+        }
+    ],
+    "minimum-stability": "dev",
+    "require": {
+        "ext-swoole": "*"
+    }
+}
